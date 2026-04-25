@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: bd_spark_postgres
+    environment:
+      POSTGRES_DB: lab2
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/postgres:/docker-entrypoint-initdb.d:ro
+      - "./исходные данные:/data:ro"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: bd_spark_clickhouse
+    environment:
+      CLICKHOUSE_DB: reports
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: lab
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./sql/clickhouse:/docker-entrypoint-initdb.d:ro
+
+  spark:
+    image: apache/spark:3.5.1
+    container_name: bd_spark_runner
+    command: ["tail", "-f", "/dev/null"]
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/lab2
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/reports
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: lab
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./jobs:/opt/spark/jobs:ro
+      - ./sql:/opt/spark/sql:ro
+    depends_on:
+      - postgres
+      - clickhouse
+
+volumes:
+  postgres_data:
+  clickhouse_data:

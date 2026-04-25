@@ -85,3 +85,96 @@
 7. Код Apache Spark трансформации данных из снежинки/звезды в отчеты в Neo4j.
 8. Код Apache Spark трансформации данных из снежинки/звезды в отчеты в MongoDB.
 9. Код Apache Spark трансформации данных из снежинки/звезды в отчеты в Valkey.
+
+## Решение
+
+Выполнен обязательный объем лабораторной:
+
+1. `docker-compose.yml` - PostgreSQL 16, ClickHouse 24.8 и Spark 3.5.1.
+2. `sql/postgres/01_create_raw.sql` - создание сырой таблицы `mock_data`.
+3. `sql/postgres/02_load_raw.sql` - загрузка всех 10 CSV в PostgreSQL.
+4. `sql/postgres/03_create_star_schema.sql` - DDL снежинки/звезды в PostgreSQL.
+5. `jobs/etl_to_postgres_star.py` - Spark ETL из `mock_data` в измерения и `fact_sales`.
+6. `sql/clickhouse/01_reports_schema.sql` - таблицы отчетов в ClickHouse.
+7. `jobs/build_clickhouse_reports.py` - Spark ETL из снежинки PostgreSQL в 6 витрин ClickHouse.
+
+Опциональные Cassandra, Neo4j, MongoDB и Valkey не добавлены.
+
+## Покрытие отчетов ClickHouse
+
+| Требование | Таблица / поле |
+| --- | --- |
+| Топ-10 самых продаваемых продуктов | `product_sales_report.sales_rank <= 10` |
+| Общая выручка по категориям продуктов | `product_sales_report.product_category`, `category_revenue` |
+| Средний рейтинг и количество отзывов для каждого продукта | `product_sales_report.avg_rating`, `total_reviews` |
+| Топ-10 клиентов по сумме покупок | `customer_sales_report.spending_rank <= 10` |
+| Распределение клиентов по странам | `customer_sales_report.country`, `country_customer_count` |
+| Средний чек для каждого клиента | `customer_sales_report.avg_order_value` |
+| Месячные и годовые тренды продаж | `time_sales_report.year_number`, `month_number`, `total_revenue` |
+| Сравнение выручки за разные периоды | `time_sales_report.prev_month_revenue`, `revenue_delta` |
+| Средний размер заказа по месяцам | `time_sales_report.avg_order_value` |
+| Топ-5 магазинов по выручке | `store_sales_report.revenue_rank <= 5` |
+| Распределение продаж по городам и странам | `store_sales_report.city`, `country`, `city_country_revenue` |
+| Средний чек для каждого магазина | `store_sales_report.avg_order_value` |
+| Топ-5 поставщиков по выручке | `supplier_sales_report.revenue_rank <= 5` |
+| Средняя цена товаров от поставщика | `supplier_sales_report.avg_product_price` |
+| Распределение продаж по странам поставщиков | `supplier_sales_report.country`, `supplier_country_revenue` |
+| Продукты с максимальным и минимальным рейтингом | `product_quality_report.rating_rank_high`, `rating_rank_low` |
+| Корреляция рейтинга и объема продаж | `product_quality_report.rating_sales_correlation` |
+| Продукты с наибольшим количеством отзывов | `product_quality_report.review_rank` |
+
+## Запуск
+
+Для чистого запуска:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+PostgreSQL для DBeaver:
+
+- host: `localhost`
+- port: `5433`
+- database: `lab2`
+- user: `lab`
+- password: `lab`
+
+ClickHouse:
+
+- HTTP port: `8123`
+- native port: `9000`
+- database: `reports`
+- user: `default`
+- password: `lab`
+
+## Spark-джобы
+
+Сначала построить снежинку/звезду в PostgreSQL:
+
+```bash
+docker compose exec -T spark /opt/spark/bin/spark-submit \
+  --master 'local[*]' \
+  --conf spark.jars.ivy=/tmp/.ivy2 \
+  --packages org.postgresql:postgresql:42.7.3,com.clickhouse:clickhouse-jdbc:0.6.5,org.apache.httpcomponents.client5:httpclient5:5.2.1 \
+  /opt/spark/jobs/etl_to_postgres_star.py
+```
+
+Затем построить 6 отчетов в ClickHouse:
+
+```bash
+docker compose exec -T spark /opt/spark/bin/spark-submit \
+  --master 'local[*]' \
+  --conf spark.jars.ivy=/tmp/.ivy2 \
+  --packages org.postgresql:postgresql:42.7.3,com.clickhouse:clickhouse-jdbc:0.6.5,org.apache.httpcomponents.client5:httpclient5:5.2.1 \
+  /opt/spark/jobs/build_clickhouse_reports.py
+```
+
+## Проверка
+
+```bash
+docker compose exec -T postgres psql -U lab -d lab2 -c "SELECT COUNT(*) FROM mock_data;"
+docker compose exec -T postgres psql -U lab -d lab2 -c "SELECT COUNT(*) FROM fact_sales;"
+docker compose exec -T clickhouse clickhouse-client --password lab --query "SELECT count() FROM reports.product_sales_report"
+docker compose exec -T clickhouse clickhouse-client --password lab --query "SELECT * FROM reports.time_sales_report ORDER BY year_number, month_number LIMIT 10"
+```
